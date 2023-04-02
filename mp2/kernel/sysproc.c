@@ -44,12 +44,21 @@ sys_sbrk(void)
   int addr;
   int n;
 
-  if(argint(0, &n) < 0)
-    return -1;
+  if (argint(0, &n) < 0) return -1;
   
-  addr = myproc()->sz;
-  if(growproc(n) < 0)
-    return -1;
+  struct proc *p = myproc();
+  addr = p->sz;
+
+  uint64 newAddr = addr + n;
+  if (n > 0) {
+    if (newAddr >= MAXVA || newAddr <= 0) return addr;
+    p->sz = newAddr;
+  }
+  else if (n < 0) {
+    if (uvmdealloc(p->pagetable, addr, newAddr) != newAddr) return -1;
+    p->sz = newAddr;
+  }
+
   return addr;
 }
 

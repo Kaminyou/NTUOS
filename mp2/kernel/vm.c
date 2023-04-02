@@ -8,6 +8,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "vm.h"
+#define PTE_RWX (PTE_R | PTE_W | PTE_X | PTE_U)
 
 /*
  * the kernel's page table.
@@ -175,10 +176,13 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     panic("uvmunmap: not aligned");
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
-    if((pte = walk(pagetable, a, 0)) == 0)
-      panic("uvmunmap: walk");
-    if((*pte & PTE_V) == 0)
-      panic("uvmunmap: not mapped");
+    if ((pte = walk(pagetable, a, 0)) == 0) continue;
+
+    if ((*pte & PTE_V) == 0) {
+      if (*pte & PTE_S) *pte = 0;
+      continue;
+    }
+    
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
@@ -477,21 +481,21 @@ void _vmprint(pagetable_t pagetable, int depth, int isParentLast, int isGrandPar
   for (int i = 0; i < 512; i++){
     if (pagetable[i] & PTE_V || pagetable[i] & PTE_S) {
       print_prefix(depth, isParentLast, isGrandParentLast);
-      uint64 lower_pagetable = PTE2PA(pagetable[i]);
+      uint64 lowerPagetable = PTE2PA(pagetable[i]);
       uint64 flags = PTE_FLAGS(pagetable[i]);
-      int flag_S = flags & PTE_S;
+      int flagS = flags & PTE_S;
       int isLastEntry = (i == last_entry);
       uint64 va = calculate_va(depth, i, parentIdx, grandParentIdx);
       
-      printf("+-- %d: pte=%p va=%p",i,&pagetable[i], va);
-      if (flag_S) {
+      printf("+-- %d: pte=%p va=%p", i, &pagetable[i], va);
+      if (flagS) {
         printf(" blockno=%p", PTE2BLOCKNO(pagetable[i]));
       } else {
-        printf(" pa=%p", lower_pagetable);
+        printf(" pa=%p", lowerPagetable);
       }
       print_flag(pagetable[i]);
       printf("\n");
-      _vmprint((pagetable_t)lower_pagetable, depth + 1, isLastEntry, isParentLast, i, parentIdx);
+      _vmprint((pagetable_t)lowerPagetable, depth + 1, isLastEntry, isParentLast, i, parentIdx);
     } 
   }
 }
@@ -505,5 +509,60 @@ void vmprint(pagetable_t pagetable) {
 /* Map pages to physical memory or swap space. */
 int madvise(uint64 base, uint64 len, int advice) {
   /* TODO */
-  panic("not implemented yet\n");
+  struct proc *p = myproc();
+  pte_t *pte;
+
+  if (base + len > p->sz) return -1;
+
+  // do nothing
+  if (advice == MADV_NORMAL) return 0;
+
+  // swap in
+  if (advice == MADV_WILLNEED) {
+    for (uint64 va = PGROUNDDOWN(base); va < base + len; va += PGSIZE) {
+      if ((pte = walk(p->pagetable, va, 1)) == 0) continue;
+      
+      if (*pte & PTE_S) {
+
+        begin_op();
+        uint64 blockno = PTE2BLOCKNO(*pte);
+        char *pa = kalloc();
+        read_page_from_disk(ROOTDEV, pa, blockno);
+        *pte = PA2PTE(pa) | PTE_FLAGS(*pte);
+        end_op();
+
+        *pte &= ~PTE_S; // unset
+        *pte |= PTE_V; // set
+      }
+      else if ((*pte & PTE_V) == 0) {
+        char *pa = kalloc();
+        if (pa == 0) return -3;
+        memset(pa, 0, PGSIZE);
+        if (mappages(p->pagetable, va, PGSIZE, (uint64)pa, PTE_RWX) != 0) {
+          kfree(pa);
+          return -4;
+        }
+      }
+    }
+  }
+
+  // swap out
+  if (advice == MADV_DONTNEED) {
+    for (uint64 va = PGROUNDDOWN(base); va < base + len; va += PGSIZE) {
+      if ((pte = walk(p->pagetable, va, 0)) == 0) continue;
+      if ((*pte & PTE_V) == 0) continue;
+
+      begin_op();
+      uint64 blockno = balloc_page(ROOTDEV);
+      uint64 pa = PTE2PA(*pte);
+      write_page_to_disk(ROOTDEV, (char *)pa, blockno);
+      end_op();
+
+      kfree((void *)pa);
+      *pte = BLOCKNO2PTE(blockno) | PTE_FLAGS(*pte);
+      *pte &= ~PTE_V; // unset
+      *pte |= PTE_S; // set
+    }
+  }
+  return 0;
 }
