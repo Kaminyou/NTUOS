@@ -115,6 +115,12 @@ found:
   p->pid = allocpid();
 
   //TODO: mp3
+  p->thrdstop_context_id = -1;
+  p->thrdstop_delay = -1;
+  p->thrdstop_ticks = 0;
+  p->sys_def = 0;
+
+  for(int j = 0; j < MAX_THRD_NUM; ++j) p->thrdstop_context_used[j] = 0;
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){

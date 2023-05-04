@@ -101,6 +101,15 @@ struct proc {
   int pid;                     // Process ID
 
   //TODO: mp3
+  int thrdstop_context_id;
+  int thrdstop_ticks;
+  int thrdstop_delay;
+  struct trapframe thrdstop_saved_frame[MAX_THRD_NUM];
+  int thrdstop_context_used[MAX_THRD_NUM];
+  uint64 thrdstop_handler_pointer;
+  uint64 thrstop_handler_arg;
+  int sys_def; /* Let usertrapret know what should we do now */
+  int is_exit;
 
   // these are private to the process, so p->lock need not be held.
   uint64 kstack;               // Virtual address of kernel stack

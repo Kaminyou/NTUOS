@@ -79,6 +79,11 @@ usertrap(void)
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2){
     //TODO: mp3
+    if(p->thrdstop_delay != -1) p->thrdstop_ticks++;
+    if(p->thrdstop_ticks > 0 && p->thrdstop_ticks == p->thrdstop_delay) {
+      p->thrdstop_delay= -1;
+      p->sys_def = 1;
+    }
 
     yield();
   }
@@ -109,6 +114,35 @@ usertrapret(void)
   p->trapframe->kernel_hartid = r_tp();         // hartid for cpuid()
 
 
+  if(p->sys_def == 1) {
+    /* the delay completed, let the program counter be the handler */
+    p->thrdstop_saved_frame[p->thrdstop_context_id] = *(p->trapframe);
+    p->trapframe->epc = p->thrdstop_handler_pointer;
+    p->trapframe->a0 = p->thrstop_handler_arg;
+  }
+  else if(p->sys_def == 2) {
+    if(!p->is_exit && p->thrdstop_context_id != -1) {
+      /* store current context */
+      p->thrdstop_saved_frame[p->thrdstop_context_id] = *(p->trapframe);
+    }
+    else if(p->is_exit) {
+      /* recycle id */
+      p->thrdstop_context_used[p->thrdstop_context_id] = 0; 
+    } 
+  }
+  else if(p->sys_def == 3) {
+    /* the saved_frame is the context when the delay completed */
+    uint64 kernel_satp = p->trapframe->kernel_satp;  
+    uint64 kernel_sp = p->trapframe->kernel_sp;     
+    uint64 kernel_trap = p->trapframe->kernel_trap; 
+    uint64 kernel_hartid = p->trapframe->kernel_hartid; 
+    *(p->trapframe) = p->thrdstop_saved_frame[p->thrdstop_context_id];
+    p->trapframe->kernel_satp = kernel_satp;
+    p->trapframe->kernel_sp = kernel_sp;
+    p->trapframe->kernel_trap = kernel_trap;
+    p->trapframe->kernel_hartid = kernel_hartid;
+  }
+  p->sys_def = 0;
 
   // set up the registers that trampoline.S's sret will use
   // to get to user space.
@@ -156,6 +190,12 @@ kerneltrap()
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2 && myproc() != 0 && myproc()->state == RUNNING){
     //TODO: mp3
+    struct proc *p = myproc();
+    if(p->thrdstop_delay != -1) p->thrdstop_ticks++;
+    if(p->thrdstop_ticks > 0 && p->thrdstop_ticks == p->thrdstop_delay) {
+      p->thrdstop_delay= -1;
+      p->sys_def = 1;
+    }
     yield();
   }
 
