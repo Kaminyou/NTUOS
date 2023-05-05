@@ -49,6 +49,7 @@ usertrap(void)
   
   // save user program counter.
   p->trapframe->epc = r_sepc();
+  //printf("r_scause() %d\n", r_scause());
   
   if(r_scause() == 8){
     // system call
@@ -77,10 +78,14 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
+  //printf("which_dev %d\n", which_dev);
   if(which_dev == 2){
     //TODO: mp3
+    
     if(p->thrdstop_delay != -1) p->thrdstop_ticks++;
+    //printf("p->thrdstop_ticks %d\n", p->thrdstop_ticks);
     if(p->thrdstop_ticks > 0 && p->thrdstop_ticks == p->thrdstop_delay) {
+      //printf("oooo\n");
       p->thrdstop_delay= -1;
       p->sys_def = 1;
     }
@@ -116,9 +121,11 @@ usertrapret(void)
 
   if(p->sys_def == 1) {
     /* the delay completed, let the program counter be the handler */
+    //printf("hereee\n");
     p->thrdstop_saved_frame[p->thrdstop_context_id] = *(p->trapframe);
     p->trapframe->epc = p->thrdstop_handler_pointer;
     p->trapframe->a0 = p->thrstop_handler_arg;
+    //printf("hereeeeee\n");
   }
   else if(p->sys_def == 2) {
     if(!p->is_exit && p->thrdstop_context_id != -1) {

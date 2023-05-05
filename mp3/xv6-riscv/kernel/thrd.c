@@ -45,6 +45,8 @@ sys_thrdstop(void)
       if(!p->thrdstop_context_used[i]) {
         p->thrdstop_context_id = i;
         p->thrdstop_context_used[i] = 1;
+        //printf("assign to %d \n", i);
+        copyout(p->pagetable, context_id_ptr, (char *)&i, sizeof(int));
         //return i;
         return 0;
       }
