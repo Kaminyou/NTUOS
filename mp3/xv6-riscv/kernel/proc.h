@@ -104,12 +104,13 @@ struct proc {
   int thrdstop_context_id;
   int thrdstop_ticks;
   int thrdstop_delay;
-  struct trapframe thrdstop_saved_frame[MAX_THRD_NUM];
-  int thrdstop_context_used[MAX_THRD_NUM];
+  int sys_def;
+  int is_exit;
   uint64 thrdstop_handler_pointer;
   uint64 thrstop_handler_arg;
-  int sys_def; /* Let usertrapret know what should we do now */
-  int is_exit;
+  struct trapframe thrdstop_saved_frame[MAX_THRD_NUM];
+  int thrdstop_context_used[MAX_THRD_NUM];
+
 
   // these are private to the process, so p->lock need not be held.
   uint64 kstack;               // Virtual address of kernel stack

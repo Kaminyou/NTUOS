@@ -23,38 +23,32 @@ sys_thrdstop(void)
   if (argaddr(3, &handler_arg) < 0)
     return -1;
 
-  //struct proc *proc = myproc();  
   //TODO: mp3
   struct proc *p = myproc();
   int thrdstop_context_id;
   copyin(p->pagetable, (char *)&thrdstop_context_id, context_id_ptr, sizeof(int));
-  //printf("thrdstop_context_id %d \n", thrdstop_context_id);
 
   p->thrdstop_ticks = 0;
   p->thrdstop_delay = delay;
   p->thrdstop_handler_pointer = handler;
   p->thrstop_handler_arg = handler_arg;
-  if(thrdstop_context_id >= 0 && thrdstop_context_id < MAX_THRD_NUM) {
+
+  if (thrdstop_context_id >= 0 && thrdstop_context_id < MAX_THRD_NUM) {
     p->thrdstop_context_id = thrdstop_context_id;
     p->thrdstop_context_used[thrdstop_context_id] = 1;
-    //return thrdstop_context_id;
     return 0;
   }
   else if(thrdstop_context_id == -1) {
     for(int i = 0; i < MAX_THRD_NUM; ++i) {
-      if(!p->thrdstop_context_used[i]) {
+      if (!p->thrdstop_context_used[i]) {
         p->thrdstop_context_id = i;
         p->thrdstop_context_used[i] = 1;
-        //printf("assign to %d \n", i);
         copyout(p->pagetable, context_id_ptr, (char *)&i, sizeof(int));
-        //return i;
         return 0;
       }
     }
   }
   return -1;
-
-  //return 0;
 }
 
 // for mp3
@@ -71,17 +65,13 @@ sys_cancelthrdstop(void)
     return -1;
   }
 
-  //struct proc *proc = myproc();
-
   //TODO: mp3
   struct proc *p = myproc();
   p->thrdstop_context_id = context_id;
-  p->sys_def = 2;
-  p->is_exit = is_exit;
   p->thrdstop_delay= -1;
+  p->is_exit = is_exit;
+  p->sys_def = 2;
   return p->thrdstop_ticks;
-
-  //return 0;
 }
 
 // for mp3
@@ -92,10 +82,10 @@ sys_thrdresume(void)
   if (argint(0, &context_id) < 0)
     return -1;
 
-  //struct proc *proc = myproc();
-
   //TODO: mp3
-  myproc()->sys_def = 3;
-  myproc()->thrdstop_context_id = context_id;
+  struct proc *p = myproc();
+
+  p->sys_def = 3;
+  p->thrdstop_context_id = context_id;
   return 0;
 }
