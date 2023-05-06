@@ -123,7 +123,7 @@ usertrapret(void)
     p->trapframe->a0 = p->thrstop_handler_arg;
   }
   else if (p->sys_def == 2) {  // case B
-    if(!p->is_exit && p->thrdstop_context_id != -1) {
+    if (!p->is_exit && p->thrdstop_context_id != -1) {
       p->thrdstop_saved_frame[p->thrdstop_context_id] = *(p->trapframe);
     }
     else if (p->is_exit) {
