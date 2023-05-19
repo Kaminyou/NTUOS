@@ -315,6 +315,31 @@ sys_open(void)
       return -1;
     }
     ilock(ip);
+
+    if (ip->type == T_SYMLINK && (omode & O_NOFOLLOW) == 0) {
+      int t = 0;
+
+      while (ip->type == T_SYMLINK) {
+        int len;
+        readi(ip, 0, (uint64)(&len), 0, sizeof(int));
+        readi(ip, 0, (uint64)path, sizeof(int), len + 1);
+        iunlockput(ip);
+
+        if ((ip = namei(path)) == 0){
+          end_op();
+          return -1;
+        }
+
+        ilock(ip);
+        
+        t += 1;
+        if (t > 23) {
+          iunlockput(ip);
+          end_op();
+          return -1;
+        }
+      }
+    }
     if(ip->type == T_DIR && omode != O_RDONLY){
       iunlockput(ip);
       end_op();
@@ -410,6 +435,27 @@ sys_chdir(void)
     return -1;
   }
   ilock(ip);
+
+  int t = 0;
+  while (ip->type == T_SYMLINK) {
+    int len;
+    readi(ip, 0, (uint64)(&len), 0, sizeof(int));
+    readi(ip, 0, (uint64)path, sizeof(int), len + 1);
+    iunlockput(ip);
+
+    if((ip = namei(path)) == 0){
+      end_op();
+      return -1;
+    }
+    ilock(ip);
+    t += 1;
+    if (t > 23) {
+      iunlockput(ip);
+      end_op();
+      return -1;
+    }
+  }
+
   if(ip->type != T_DIR){
     iunlockput(ip);
     end_op();
@@ -500,13 +546,26 @@ sys_symlink(void)
 {
   // TODO: symbolic link
   // You should implement this symlink system call.
-  // char target[MAXPATH], path[MAXPATH];
-  // struct inode *ip;
+  char target[MAXPATH];
+  char path[MAXPATH];
+  struct inode *ip;
 
-  // if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
-  //   return -1;
-  
-  panic("You should implement symlink system call.");
+  begin_op();
+  if (argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0) {
+    end_op();
+    return -1;
+  }
 
+  if ((ip = create(path, T_SYMLINK, 0, 0)) == 0) {
+    end_op();
+    return -1;
+  }
+
+  int len = strlen(target);
+
+  writei(ip, 0, (uint64)(&len), 0, sizeof(int));
+  writei(ip, 0, (uint64)target, sizeof(int), len + 1);
+  iunlockput(ip); 
+  end_op();
   return 0;
 }

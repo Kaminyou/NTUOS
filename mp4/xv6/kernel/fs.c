@@ -380,7 +380,8 @@ bmap(struct inode *ip, uint bn)
   // TODO: Large Files
   // You should modify bmap(),
   // so that it can handle doubly indrect inode.
-  uint addr, *a;
+  uint addr;
+  uint *ba, *bpa;
   struct buf *bp;
 
   if(bn < NDIRECT){
@@ -390,14 +391,51 @@ bmap(struct inode *ip, uint bn)
   }
   bn -= NDIRECT;
 
-  if(bn < NINDIRECT){
+  // Check NINDIRECT part
+  if (bn < NINDIRECT) {
     // Load indirect block, allocating if necessary.
-    if((addr = ip->addrs[NDIRECT]) == 0)
+    if ((addr = ip->addrs[NDIRECT]) == 0)
       ip->addrs[NDIRECT] = addr = balloc(ip->dev);
     bp = bread(ip->dev, addr);
-    a = (uint*)bp->data;
-    if((addr = a[bn]) == 0){
-      a[bn] = addr = balloc(ip->dev);
+    ba = (uint*)bp->data;
+    if ((addr = ba[bn]) == 0){
+      ba[bn] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);
+    return addr;
+  }
+  bn -= NINDIRECT;
+
+  struct buf *bpt;
+
+  // Check NDOUINDIRECT part
+  if (bn < NDOUINDIRECT * 2) {
+    if (bn < NDOUINDIRECT) { // First NDOUINDIRECT
+      if ((addr = ip->addrs[NDIRECT+1]) == 0) 
+        ip->addrs[NDIRECT+1] = addr = balloc(ip->dev);
+    }
+    else { // Second NDOUINDIRECT
+      if ((addr = ip->addrs[NDIRECT+2]) == 0) 
+        ip->addrs[NDIRECT+2] = addr = balloc(ip->dev);
+      bn -= NDOUINDIRECT;
+    }
+
+    // Get two layer
+    uint layer_first = bn / NINDIRECT;
+    bpt = bread(ip->dev, addr);
+    bpa = (uint *)bpt->data;
+    if ((addr = bpa[layer_first]) == 0) {
+      bpa[layer_first] = addr = balloc(ip->dev);
+      log_write(bpt);
+    }
+    brelse(bpt);
+    
+    uint layer_second = bn - layer_first * NINDIRECT;
+    bp = bread(ip->dev, addr);
+    ba = (uint *)bp->data;
+    if((addr = ba[layer_second]) == 0) {
+      ba[layer_second] = addr = balloc(ip->dev);
       log_write(bp);
     }
     brelse(bp);
@@ -417,7 +455,7 @@ itrunc(struct inode *ip)
   // so that it can handle doubly indrect inode.
   int i, j;
   struct buf *bp;
-  uint *a;
+  uint *ba;
 
   for(i = 0; i < NDIRECT; i++){
     if(ip->addrs[i]){
@@ -428,16 +466,39 @@ itrunc(struct inode *ip)
 
   if(ip->addrs[NDIRECT]){
     bp = bread(ip->dev, ip->addrs[NDIRECT]);
-    a = (uint*)bp->data;
-    for(j = 0; j < NINDIRECT; j++){
-      if(a[j])
-        bfree(ip->dev, a[j]);
+    ba = (uint *)bp->data;
+    for (j = 0; j < NINDIRECT; j++) {
+      if(ba[j])
+        bfree(ip->dev, ba[j]);
     }
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
   }
 
+  struct buf *bpt;
+  uint *bpa;
+
+  for (int k = 1; k <= 2; ++k) {
+    if (ip->addrs[NDIRECT+k]) {
+      bpt = bread(ip->dev, ip->addrs[NDIRECT+k]);
+      bpa = (uint *)bpt->data;
+      for (i = 0; i < NINDIRECT; ++i) {
+        if (bpa[i]) {
+          bp = bread(ip->dev, bpa[i]);
+          ba = (uint *)bp->data;
+          for (j = 0; j < NINDIRECT; ++j) {
+            if(ba[j]) bfree(ip->dev, ba[j]); // OK
+          }
+          brelse(bp);
+          bfree(ip->dev, bpa[i]);
+        }
+      }
+      brelse(bpt);
+      bfree(ip->dev, ip->addrs[NDIRECT+k]);
+      ip->addrs[NDIRECT+k] = 0;
+    }
+  }
   ip->size = 0;
   iupdate(ip);
 }
@@ -637,29 +698,57 @@ namex(char *path, int nameiparent, char *name)
   // TODO: Symbolic Link to Directories
   // Modify this function to deal with symbolic links to directories.
   struct inode *ip, *next;
+  char tmp[256];
+  char cur_path[256];
+  strncpy(cur_path, path, 256);
+  path = cur_path;
+  int t = 0;
   
   if(*path == '/')
     ip = iget(ROOTDEV, ROOTINO);
   else
     ip = idup(myproc()->cwd);
 
-  while((path = skipelem(path, name)) != 0){
+  while ((path = skipelem(path, name)) != 0) {
     ilock(ip);
-    if(ip->type != T_DIR){
+    if (ip->type == T_SYMLINK) {
+      t += 1;
+      int len;
+      memset(tmp, 0, 256);
+      readi(ip, 0, (uint64)(&len), 0, sizeof(int));
+      readi(ip, 0, (uint64)tmp, sizeof(int), len + 1);
       iunlockput(ip);
-      return 0;
+      strcat(tmp, "/");
+      strcat(tmp, name);
+      if (path[0] != 0) {
+        strcat(tmp, "/");
+        strcat(tmp, path);
+      }
+      strncpy(cur_path, tmp, 256);
+      path = cur_path;
+
+      if(t > 23 || strlen(path) > 128) return 0;
+
+      if (*path == '/') ip = iget(ROOTDEV, ROOTINO);
+      else ip = idup(myproc()->cwd);
     }
-    if(nameiparent && *path == '\0'){
-      // Stop one level early.
-      iunlock(ip);
-      return ip;
-    }
-    if((next = dirlookup(ip, name, 0)) == 0){
+    else {
+      if(ip->type != T_DIR){
+        iunlockput(ip);
+        return 0;
+      }
+      if(nameiparent && *path == '\0'){
+        // Stop one level early.
+        iunlock(ip);
+        return ip;
+      }
+      if((next = dirlookup(ip, name, 0)) == 0){
+        iunlockput(ip);
+        return 0;
+      }
       iunlockput(ip);
-      return 0;
+      ip = next;
     }
-    iunlockput(ip);
-    ip = next;
   }
   if(nameiparent){
     iput(ip);
